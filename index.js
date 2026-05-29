@@ -1,0 +1,36 @@
+import { config } from 'dotenv';
+config();
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import authController from './authController.js';
+import analyticsController from './analyticsController.js';
+import statementController from './statementController.js';
+
+
+const app = express();
+
+app.use(helmet());
+app.use(cors({ origin: '*'}));
+app.use(express.json());
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'PesaMind API is running' });
+});
+
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+app.use('/api/', limiter);
+
+app.use('/api/auth', authController);
+app.use('/api/analytics', analyticsController);
+app.use('/api/statements', statementController);
+
+app.get('/health', (req, res) => res.json({ status: 'OK', service: 'PesaMind API' }));
+
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log(`PesaMind API running on port ${PORT}`));
