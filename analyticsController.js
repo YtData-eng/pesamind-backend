@@ -204,4 +204,142 @@ router.get('/budgets', authenticate, getBudgets);
 router.post('/budgets', authenticate, setBudget);
 router.get('/transactions', authenticate, getTransactions);
 
+export const getHealthScore = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { rows: [stats] } = await query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS income,
+        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS expenses,
+        COUNT(*) AS tx_count
+      FROM transactions
+      WHERE user_id = $1
+      AND transaction_date >= NOW() - INTERVAL '30 days'
+    `, [userId]);
+
+    const { rows: [prevStats] } = await query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS expenses
+      FROM transactions
+      WHERE user_id = $1
+      AND transaction_date >= NOW() - INTERVAL '60 days'
+      AND transaction_date < NOW() - INTERVAL '30 days'
+    `, [userId]);
+
+    const { rows: topCat } = await query(`
+      SELECT category, SUM(amount) AS total
+      FROM transactions
+      WHERE user_id = $1
+      AND type NOT IN ('receive','deposit','salary')
+      AND transaction_date >= NOW() - INTERVAL '30 days'
+      GROUP BY category ORDER BY total DESC LIMIT 1
+    `, [userId]);
+
+    const income = parseFloat(stats.income) || 0;
+    const expenses = parseFloat(stats.expenses) || 0;
+    const prevExpenses = parseFloat(prevStats.expenses) || 0;
+
+    // Calculate score components
+    const savingsRate = income > 0 ? (income - expenses) / income : 0;
+    const spendingChange = prevExpenses > 0 ? (expenses - prevExpenses) / prevExpenses : 0;
+
+    let score = 50;
+    if (savingsRate >= 0.3) score += 25;
+    else if (savingsRate >= 0.2) score += 20;
+    else if (savingsRate >= 0.1) score += 10;
+    else if (savingsRate < 0) score -= 20;
+
+    if (spendingChange < 0) score += 15;
+    else if (spendingChange < 0.1) score += 10;
+    else if (spendingChange > 0.3) score -= 15;
+    else if (spendingChange > 0.2) score -= 10;
+
+    if (stats.tx_count > 50) score += 10;
+
+    score = Math.min(100, Math.max(0, score));
+
+    const insights = [];
+    if (savingsRate < 0) insights.push(`⚠️ You spent more than you earned this month`);
+    else if (savingsRate > 0.2) insights.push(`✅ Great job! You saved ${Math.round(savingsRate * 100)}% of your income`);
+    
+    if (spendingChange > 0.2) insights.push(`📈 Spending increased ${Math.round(spendingChange * 100)}% vs last month`);
+    else if (spendingChange < -0.1) insights.push(`📉 Spending decreased ${Math.round(Math.abs(spendingChange) * 100)}% vs last month`);
+
+    if (topCat.length > 0) insights.push(`🏆 Largest category: ${topCat[0].category?.replace(/_/g, ' ')} (KSH ${Number(topCat[0].total).toLocaleString()})`);
+
+    const grade = score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : score >= 40 ? 'Fair' : 'Needs Work';
+
+    res.json({ score, grade, insights, savingsRate: Math.round(savingsRate * 100), spendingChange: Math.round(spendingChange * 100) });
+  } catch (err) {
+    console.error('Health score error:', err);
+    res.status(500).json({ error: 'Failed to calculate health score' });
+  }
+};
+
 export default router;
+export const generateAIBudgets = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { rows: spending } = await query(`
+      SELECT category, AVG(monthly_total) as avg_monthly
+      FROM (
+        SELECT category,
+          EXTRACT(YEAR FROM transaction_date) as yr,
+          EXTRACT(MONTH FROM transaction_date) as mo,
+          SUM(amount) as monthly_total
+        FROM transactions
+        WHERE user_id = $1
+        AND type NOT IN ('receive','deposit','salary')
+        AND transaction_date >= NOW() - INTERVAL '3 months'
+        GROUP BY category, yr, mo
+      ) sub
+      GROUP BY category
+      ORDER BY avg_monthly DESC
+    `, [userId]);
+
+    const { rows: [income] } = await query(`
+      SELECT COALESCE(AVG(monthly_income), 0) as avg_income
+      FROM (
+        SELECT EXTRACT(YEAR FROM transaction_date) as yr,
+          EXTRACT(MONTH FROM transaction_date) as mo,
+          SUM(amount) as monthly_income
+        FROM transactions
+        WHERE user_id = $1
+        AND type IN ('receive','deposit','salary')
+        AND transaction_date >= NOW() - INTERVAL '3 months'
+        GROUP BY yr, mo
+      ) sub
+    `, [userId]);
+
+    const avgIncome = parseFloat(income.avg_income) || 0;
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+
+    const budgets = spending.map(s => ({
+      category: s.category,
+      suggested: Math.round(parseFloat(s.avg_monthly) * 0.9),
+      current_avg: Math.round(parseFloat(s.avg_monthly)),
+    }));
+
+    // Auto-insert budgets
+    for (const b of budgets) {
+      if (b.suggested > 0) {
+        await query(`
+          INSERT INTO budgets (user_id, category, amount, month, year)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (user_id, category, month, year) DO NOTHING
+        `, [userId, b.category, b.suggested, month, year]);
+      }
+    }
+
+    res.json({ budgets, avgIncome: Math.round(avgIncome), month, year });
+  } catch (err) {
+    console.error('AI budget error:', err);
+    res.status(500).json({ error: 'Failed to generate budgets' });
+  }
+};
+router.get('/health-score', authenticate, getHealthScore);
+router.post('/generate-budgets', authenticate, generateAIBudgets);
