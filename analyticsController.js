@@ -300,6 +300,29 @@ export const getMonthlyTrend = async (req, res) => {
   }
 };
 
+export const getMonthlyTrend = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rows } = await query(`
+      SELECT
+        EXTRACT(YEAR FROM transaction_date) as year,
+        EXTRACT(MONTH FROM transaction_date) as month,
+        TO_CHAR(transaction_date, 'Mon YYYY') as label,
+        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as income,
+        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as expenses
+      FROM transactions
+      WHERE user_id = $1
+      AND transaction_date >= NOW() - INTERVAL '6 months'
+      GROUP BY year, month, label
+      ORDER BY year, month ASC
+    `, [userId]);
+    res.json({ trend: rows });
+  } catch (err) {
+    console.error('Trend error:', err);
+    res.status(500).json({ error: 'Failed to fetch trend' });
+  }
+};
+
 
 export default router;
 export const generateAIBudgets = async (req, res) => {
@@ -365,5 +388,7 @@ export const generateAIBudgets = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate budgets' });
   }
 };
+
+router.get('/trend', authenticate, getMonthlyTrend);
 router.get('/health-score', authenticate, getHealthScore);
 router.post('/generate-budgets', authenticate, generateAIBudgets);
