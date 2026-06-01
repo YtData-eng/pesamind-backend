@@ -32,44 +32,29 @@ export const getAnalytics = async (req, res) => {
         COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS total_income,
         COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS total_expenses,
         COUNT(*) AS transaction_count
-      FROM transactions
-      WHERE user_id = $1 ${monthFilter}
+      FROM transactions WHERE user_id = $1 ${monthFilter}
     `, [userId]);
 
     const { rows: categories } = await query(`
       SELECT category, SUM(amount) AS total, COUNT(*) AS count
       FROM transactions
       WHERE user_id = $1 AND type NOT IN ('receive','deposit','salary') ${monthFilter}
-      GROUP BY category
-      ORDER BY total DESC
-    `, [userId]);
-
-    const { rows: dailyTrend } = await query(`
-      SELECT 
-        DATE(transaction_date) AS date,
-        SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END) AS expenses,
-        SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END) AS income
-      FROM transactions
-      WHERE user_id = $1 ${monthFilter}
-      GROUP BY DATE(transaction_date)
-      ORDER BY date ASC
+      GROUP BY category ORDER BY total DESC
     `, [userId]);
 
     const { rows: flagged } = await query(`
       SELECT * FROM transactions
       WHERE user_id = $1 AND is_flagged = TRUE ${monthFilter}
-      ORDER BY transaction_date DESC
-      LIMIT 10
+      ORDER BY transaction_date DESC LIMIT 10
     `, [userId]);
 
     const { rows: recent } = await query(`
       SELECT * FROM transactions
       WHERE user_id = $1 ${monthFilter}
-      ORDER BY transaction_date DESC
-      LIMIT 20
+      ORDER BY transaction_date DESC LIMIT 20
     `, [userId]);
 
-    res.json({ totals, categories, dailyTrend, flagged, recent });
+    res.json({ totals, categories, flagged, recent });
   } catch (err) {
     console.error('Analytics error:', err);
     res.status(500).json({ error: 'Failed to load analytics' });
@@ -91,30 +76,18 @@ export const getMonthlySummary = async (req, res) => {
       return res.json({ summary: 'No transactions found for this period. Upload an M-Pesa statement to get AI insights!' });
     }
 
-    const totalIncome = transactions
-      .filter(t => ['receive', 'deposit', 'salary'].includes(t.type))
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
-
-    const totalExpenses = transactions
-      .filter(t => !['receive', 'deposit', 'salary'].includes(t.type))
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
+    const totalIncome = transactions.filter(t => ['receive','deposit','salary'].includes(t.type)).reduce((s, t) => s + parseFloat(t.amount), 0);
+    const totalExpenses = transactions.filter(t => !['receive','deposit','salary'].includes(t.type)).reduce((s, t) => s + parseFloat(t.amount), 0);
 
     const catMap = {};
     transactions.forEach(t => {
-      if (!['receive', 'deposit', 'salary'].includes(t.type)) {
+      if (!['receive','deposit','salary'].includes(t.type)) {
         catMap[t.category] = (catMap[t.category] || 0) + parseFloat(t.amount);
       }
     });
 
-    const topCategories = Object.entries(catMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([category, total]) => ({ category, total }));
-
-    const summary = await generateMonthlySummary({
-      month, transactions, totalIncome, totalExpenses, topCategories,
-    });
-
+    const topCategories = Object.entries(catMap).sort(([,a],[,b]) => b-a).slice(0,5).map(([category, total]) => ({ category, total }));
+    const summary = await generateMonthlySummary({ month, transactions, totalIncome, totalExpenses, topCategories });
     res.json({ summary });
   } catch (err) {
     console.error('Monthly summary error:', err);
@@ -142,7 +115,6 @@ export const getBudgets = async (req, res) => {
     );
     res.json({ budgets: rows });
   } catch (err) {
-    console.error('Budgets error:', err);
     res.status(500).json({ error: 'Failed to fetch budgets' });
   }
 };
@@ -159,7 +131,6 @@ export const setBudget = async (req, res) => {
     );
     res.json({ budget });
   } catch (err) {
-    console.error('Budget error:', err);
     res.status(500).json({ error: 'Failed to set budget' });
   }
 };
@@ -169,69 +140,47 @@ export const getTransactions = async (req, res) => {
     const userId = req.user.id;
     const { category, type, page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
-
     const conditions = ['user_id = $1'];
     const params = [userId];
     let i = 2;
-
     if (category) { conditions.push(`category = $${i++}`); params.push(category); }
     if (type) { conditions.push(`type = $${i++}`); params.push(type); }
-
     const whereClause = conditions.join(' AND ');
-
     const countResult = await query(`SELECT COUNT(*) FROM transactions WHERE ${whereClause}`, params);
     const total = parseInt(countResult.rows[0].count);
-
     params.push(parseInt(limit), offset);
     const result = await query(
       `SELECT * FROM transactions WHERE ${whereClause} ORDER BY transaction_date DESC LIMIT $${i} OFFSET $${i+1}`,
       params
     );
-
-    res.json({
-      transactions: result.rows,
-      pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) }
-    });
+    res.json({ transactions: result.rows, pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) } });
   } catch (err) {
-    console.error('Transactions error:', err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 };
 
-router.get('/overview', authenticate, getAnalytics);
-router.get('/summary', authenticate, getMonthlySummary);
-router.get('/budgets', authenticate, getBudgets);
-router.post('/budgets', authenticate, setBudget);
-router.get('/transactions', authenticate, getTransactions);
-
 export const getHealthScore = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const { rows: [stats] } = await query(`
       SELECT
         COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS income,
         COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS expenses,
         COUNT(*) AS tx_count
-      FROM transactions
-      WHERE user_id = $1
+      FROM transactions WHERE user_id = $1
       AND transaction_date >= NOW() - INTERVAL '30 days'
     `, [userId]);
 
     const { rows: [prevStats] } = await query(`
-      SELECT
-        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS expenses
-      FROM transactions
-      WHERE user_id = $1
+      SELECT COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) AS expenses
+      FROM transactions WHERE user_id = $1
       AND transaction_date >= NOW() - INTERVAL '60 days'
       AND transaction_date < NOW() - INTERVAL '30 days'
     `, [userId]);
 
     const { rows: topCat } = await query(`
-      SELECT category, SUM(amount) AS total
-      FROM transactions
-      WHERE user_id = $1
-      AND type NOT IN ('receive','deposit','salary')
+      SELECT category, SUM(amount) AS total FROM transactions
+      WHERE user_id = $1 AND type NOT IN ('receive','deposit','salary')
       AND transaction_date >= NOW() - INTERVAL '30 days'
       GROUP BY category ORDER BY total DESC LIMIT 1
     `, [userId]);
@@ -239,8 +188,6 @@ export const getHealthScore = async (req, res) => {
     const income = parseFloat(stats.income) || 0;
     const expenses = parseFloat(stats.expenses) || 0;
     const prevExpenses = parseFloat(prevStats.expenses) || 0;
-
-    // Calculate score components
     const savingsRate = income > 0 ? (income - expenses) / income : 0;
     const spendingChange = prevExpenses > 0 ? (expenses - prevExpenses) / prevExpenses : 0;
 
@@ -249,27 +196,21 @@ export const getHealthScore = async (req, res) => {
     else if (savingsRate >= 0.2) score += 20;
     else if (savingsRate >= 0.1) score += 10;
     else if (savingsRate < 0) score -= 20;
-
     if (spendingChange < 0) score += 15;
     else if (spendingChange < 0.1) score += 10;
     else if (spendingChange > 0.3) score -= 15;
     else if (spendingChange > 0.2) score -= 10;
-
     if (stats.tx_count > 50) score += 10;
-
     score = Math.min(100, Math.max(0, score));
 
     const insights = [];
     if (savingsRate < 0) insights.push(`⚠️ You spent more than you earned this month`);
     else if (savingsRate > 0.2) insights.push(`✅ Great job! You saved ${Math.round(savingsRate * 100)}% of your income`);
-    
     if (spendingChange > 0.2) insights.push(`📈 Spending increased ${Math.round(spendingChange * 100)}% vs last month`);
     else if (spendingChange < -0.1) insights.push(`📉 Spending decreased ${Math.round(Math.abs(spendingChange) * 100)}% vs last month`);
-
     if (topCat.length > 0) insights.push(`🏆 Largest category: ${topCat[0].category?.replace(/_/g, ' ')} (KSH ${Number(topCat[0].total).toLocaleString()})`);
 
     const grade = score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : score >= 40 ? 'Fair' : 'Needs Work';
-
     res.json({ score, grade, insights, savingsRate: Math.round(savingsRate * 100), spendingChange: Math.round(spendingChange * 100) });
   } catch (err) {
     console.error('Health score error:', err);
@@ -277,58 +218,9 @@ export const getHealthScore = async (req, res) => {
   }
 };
 
-export const getMonthlyTrend = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { rows } = await query(`
-      SELECT
-        EXTRACT(YEAR FROM transaction_date) as year,
-        EXTRACT(MONTH FROM transaction_date) as month,
-        TO_CHAR(transaction_date, 'Mon YYYY') as label,
-        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as income,
-        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as expenses
-      FROM transactions
-      WHERE user_id = $1
-      AND transaction_date >= NOW() - INTERVAL '6 months'
-      GROUP BY year, month, label
-      ORDER BY year, month ASC
-    `, [userId]);
-    res.json({ trend: rows });
-  } catch (err) {
-    console.error('Trend error:', err);
-    res.status(500).json({ error: 'Failed to fetch trend' });
-  }
-};
-
-export const getMonthlyTrend = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { rows } = await query(`
-      SELECT
-        EXTRACT(YEAR FROM transaction_date) as year,
-        EXTRACT(MONTH FROM transaction_date) as month,
-        TO_CHAR(transaction_date, 'Mon YYYY') as label,
-        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as income,
-        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as expenses
-      FROM transactions
-      WHERE user_id = $1
-      AND transaction_date >= NOW() - INTERVAL '6 months'
-      GROUP BY year, month, label
-      ORDER BY year, month ASC
-    `, [userId]);
-    res.json({ trend: rows });
-  } catch (err) {
-    console.error('Trend error:', err);
-    res.status(500).json({ error: 'Failed to fetch trend' });
-  }
-};
-
-
-export default router;
 export const generateAIBudgets = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const { rows: spending } = await query(`
       SELECT category, AVG(monthly_total) as avg_monthly
       FROM (
@@ -337,13 +229,10 @@ export const generateAIBudgets = async (req, res) => {
           EXTRACT(MONTH FROM transaction_date) as mo,
           SUM(amount) as monthly_total
         FROM transactions
-        WHERE user_id = $1
-        AND type NOT IN ('receive','deposit','salary')
+        WHERE user_id = $1 AND type NOT IN ('receive','deposit','salary')
         AND transaction_date >= NOW() - INTERVAL '3 months'
         GROUP BY category, yr, mo
-      ) sub
-      GROUP BY category
-      ORDER BY avg_monthly DESC
+      ) sub GROUP BY category ORDER BY avg_monthly DESC
     `, [userId]);
 
     const { rows: [income] } = await query(`
@@ -353,42 +242,62 @@ export const generateAIBudgets = async (req, res) => {
           EXTRACT(MONTH FROM transaction_date) as mo,
           SUM(amount) as monthly_income
         FROM transactions
-        WHERE user_id = $1
-        AND type IN ('receive','deposit','salary')
+        WHERE user_id = $1 AND type IN ('receive','deposit','salary')
         AND transaction_date >= NOW() - INTERVAL '3 months'
         GROUP BY yr, mo
       ) sub
     `, [userId]);
 
-    const avgIncome = parseFloat(income.avg_income) || 0;
     const now = new Date();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
+    const budgets = spending.map(s => ({ category: s.category, suggested: Math.round(parseFloat(s.avg_monthly) * 0.9), current_avg: Math.round(parseFloat(s.avg_monthly)) }));
 
-    const budgets = spending.map(s => ({
-      category: s.category,
-      suggested: Math.round(parseFloat(s.avg_monthly) * 0.9),
-      current_avg: Math.round(parseFloat(s.avg_monthly)),
-    }));
-
-    // Auto-insert budgets
     for (const b of budgets) {
       if (b.suggested > 0) {
-        await query(`
-          INSERT INTO budgets (user_id, category, amount, month, year)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT (user_id, category, month, year) DO NOTHING
-        `, [userId, b.category, b.suggested, month, year]);
+        await query(
+          `INSERT INTO budgets (user_id, category, amount, month, year) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id, category, month, year) DO NOTHING`,
+          [userId, b.category, b.suggested, month, year]
+        );
       }
     }
-
-    res.json({ budgets, avgIncome: Math.round(avgIncome), month, year });
+    res.json({ budgets, avgIncome: Math.round(parseFloat(income.avg_income) || 0), month, year });
   } catch (err) {
     console.error('AI budget error:', err);
     res.status(500).json({ error: 'Failed to generate budgets' });
   }
 };
 
-router.get('/trend', authenticate, getMonthlyTrend);
+export const getMonthlyTrend = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rows } = await query(`
+      SELECT
+        EXTRACT(YEAR FROM transaction_date) as year,
+        EXTRACT(MONTH FROM transaction_date) as month,
+        TO_CHAR(transaction_date, 'Mon YYYY') as label,
+        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as income,
+        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as expenses
+      FROM transactions
+      WHERE user_id = $1
+      AND transaction_date >= NOW() - INTERVAL '6 months'
+      GROUP BY year, month, label
+      ORDER BY year, month ASC
+    `, [userId]);
+    res.json({ trend: rows });
+  } catch (err) {
+    console.error('Trend error:', err);
+    res.status(500).json({ error: 'Failed to fetch trend' });
+  }
+};
+
+router.get('/overview', authenticate, getAnalytics);
+router.get('/summary', authenticate, getMonthlySummary);
+router.get('/budgets', authenticate, getBudgets);
+router.post('/budgets', authenticate, setBudget);
+router.get('/transactions', authenticate, getTransactions);
 router.get('/health-score', authenticate, getHealthScore);
 router.post('/generate-budgets', authenticate, generateAIBudgets);
+router.get('/trend', authenticate, getMonthlyTrend);
+
+export default router;
