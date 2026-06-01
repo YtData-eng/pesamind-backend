@@ -78,29 +78,9 @@ export const getMe = async (req, res) => {
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', getMe);
-router.get('/trend', authenticate, getMonthlyTrend);
 
 
-export const getMonthlyTrend = async (req, res) => {
-  try {
-    const { rows } = await query(`
-      SELECT
-        TO_CHAR(transaction_date, 'Mon YY') as label,
-        EXTRACT(YEAR FROM transaction_date) as year,
-        EXTRACT(MONTH FROM transaction_date) as month,
-        COALESCE(SUM(CASE WHEN type IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as income,
-        COALESCE(SUM(CASE WHEN type NOT IN ('receive','deposit','salary') THEN amount ELSE 0 END), 0) as expenses
-      FROM transactions
-      WHERE user_id = $1
-      AND transaction_date >= NOW() - INTERVAL '6 months'
-      GROUP BY label, year, month
-      ORDER BY year, month ASC
-    `, [req.user.id]);
-    res.json({ trend: rows });
-  } catch (err) {
-    console.error('Trend error:', err);
-    res.status(500).json({ error: 'Failed to fetch trend' });
-  }
-};
+
+
 
 export default router;
