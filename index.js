@@ -7,7 +7,7 @@ import rateLimit from 'express-rate-limit';
 import authController from './authController.js';
 import analyticsController from './analyticsController.js';
 import statementController from './statementController.js';
-
+import fraudController from './fraud.js';
 
 const app = express();
 
@@ -24,6 +24,7 @@ app.use('/api/', limiter);
 app.use('/api/auth', authController);
 app.use('/api/analytics', analyticsController);
 app.use('/api/statements', statementController);
+app.use('/api/fraud', fraudController);
 
 app.get('/health', (req, res) => res.json({ status: 'OK', service: 'PesaMind API' }));
 
