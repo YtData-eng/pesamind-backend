@@ -1,23 +1,37 @@
 import express from 'express';
-const router = express.Router();
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from './pool.js';
 
-const signToken = (userId) =>
-  jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+const router = express.Router();
 
+// ─── Token Helper ───────────────────────────────────────────────
+const signToken = (user) =>
+  jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    }
+  );
+
+// ─── Register ───────────────────────────────────────────────────
 export const register = async (req, res) => {
   try {
-    
     const { name, full_name, email, password, phone, phone_number } = req.body;
-const userName = name || full_name;
-const userPhone = phone || phone_number;
 
-    // Check existing
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const userName = name || full_name;
+    const userPhone = phone || phone_number || null;
+
     const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length) {
       return res.status(409).json({ error: 'Email already registered' });
@@ -27,14 +41,14 @@ const userPhone = phone || phone_number;
     const verification_token = uuidv4();
 
     const { rows } = await query(
-  `INSERT INTO users (name, email, password_hash, phone, verification_token)
-   VALUES ($1, $2, $3, $4, $5)
-   RETURNING id, name, email, phone, is_verified, created_at`,
-  [userName, email, password_hash, userPhone || null, verification_token]
-);
+      `INSERT INTO users (name, email, password_hash, phone, verification_token)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, phone, is_verified, created_at`,
+      [userName, email, password_hash, userPhone, verification_token]
+    );
 
     const user = rows[0];
-    const token = signToken(user.id);
+    const token = signToken(user);
 
     res.status(201).json({ token, user });
   } catch (err) {
@@ -43,9 +57,14 @@ const userPhone = phone || phone_number;
   }
 };
 
+// ─── Login ──────────────────────────────────────────────────────
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
 
     const { rows } = await query(
       'SELECT id, name, email, phone, password_hash, is_verified FROM users WHERE email = $1',
@@ -58,11 +77,12 @@ export const login = async (req, res) => {
 
     const user = rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
+
     if (!valid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const token = signToken(user.id);
+    const token = signToken(user);
     const { password_hash, ...safeUser } = user;
 
     res.json({ token, user: safeUser });
@@ -72,15 +92,14 @@ export const login = async (req, res) => {
   }
 };
 
+// ─── Get Current User ───────────────────────────────────────────
 export const getMe = async (req, res) => {
   res.json({ user: req.user });
 };
+
+// ─── Routes ─────────────────────────────────────────────────────
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', getMe);
-
-
-
-
 
 export default router;

@@ -1,23 +1,41 @@
 import express from 'express';
-const router = express.Router();
-import { query } from './pool.js';
 import jwt from 'jsonwebtoken';
+import { query } from './pool.js';
+
+const router = express.Router();
 
 const authenticateAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No token provided' });
   }
+
   const token = authHeader.split(' ')[1];
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { id: decoded.userId || decoded.id };
-    // Check admin email
-    if (!process.env.ADMIN_EMAILS?.split(',').includes(decoded.email)) {
-      return res.status(403).json({ error: 'Admin access only' });
+
+    console.log('Decoded token:', decoded);
+
+    req.user = {
+      id: decoded.userId || decoded.id,
+      email: decoded.email,
+    };
+
+    const adminEmails = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map(email => email.trim().toLowerCase());
+
+    const userEmail = (decoded.email || '').trim().toLowerCase();
+
+    if (!adminEmails.includes(userEmail)) {
+      return res.status(403).json({ error: 'Admin access only', email: userEmail });
     }
+
     next();
   } catch (err) {
+    console.error('Admin auth error:', err);
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
@@ -52,7 +70,6 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       WHERE transaction_date >= NOW() - INTERVAL '30 days'
     `);
 
-    // Retention: users who uploaded in last 30 days AND had uploaded before
     const { rows: [retention] } = await query(`
       SELECT COUNT(DISTINCT user_id) as retained_users
       FROM statements
@@ -67,7 +84,6 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       ? Math.round((retention.retained_users / users.total_users) * 100)
       : 0;
 
-    // Monthly upload trend (last 6 months)
     const { rows: monthlyTrend } = await query(`
       SELECT
         TO_CHAR(created_at, 'Mon YY') as month,
@@ -81,7 +97,6 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       ORDER BY year, month_num
     `);
 
-    // Most used features (based on page activity proxy — statement uploads by category)
     const { rows: topCategories } = await query(`
       SELECT category, COUNT(*) as count
       FROM transactions
@@ -90,7 +105,6 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       LIMIT 6
     `);
 
-    // User growth (last 6 months)
     const { rows: userGrowth } = await query(`
       SELECT
         TO_CHAR(created_at, 'Mon YY') as month,
@@ -103,7 +117,6 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       ORDER BY year, month_num
     `);
 
-    // Top users by activity
     const { rows: topUsers } = await query(`
       SELECT u.email, u.name, u.created_at,
         COUNT(DISTINCT s.id) as statements,
@@ -145,7 +158,7 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Waitlist
+// Join waitlist (public)
 router.post('/waitlist', async (req, res) => {
   try {
     const { email, name, reason } = req.body;
