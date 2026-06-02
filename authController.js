@@ -97,6 +97,20 @@ export const getMe = async (req, res) => {
   res.json({ user: req.user });
 };
 
+// ─── Debug Token (REMOVE AFTER FIXING ADMIN ACCESS) ─────────────
+router.get('/debug-token', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.json({ error: 'No token provided' });
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    res.json({ decoded });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 // ─── Routes ─────────────────────────────────────────────────────
 router.post('/register', register);
 router.post('/login', login);
