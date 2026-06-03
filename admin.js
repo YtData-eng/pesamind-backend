@@ -4,43 +4,46 @@ import { query } from './pool.js';
 
 const router = express.Router();
 
+// ─── Admin Authentication ────────────────────────────────────────
 const authenticateAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
+  const founderKey = req.headers['x-founder-key'];
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+  // Allow access with founder key
+  if (founderKey === process.env.FOUNDER_KEY || founderKey === 'pesamind2026') {
+    req.user = { id: 'founder', email: process.env.ADMIN_EMAILS?.split(',')[0] };
+    return next();
   }
 
-  const token = authHeader.split(' ')[1];
+  // Allow access with JWT token
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log('Decoded token:', decoded);
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const adminEmails = (process.env.ADMIN_EMAILS || '')
+        .split(',')
+        .map(email => email.trim().toLowerCase());
 
-    console.log('Decoded token:', decoded);
+      const userEmail = (decoded.email || '').trim().toLowerCase();
 
-    req.user = {
-      id: decoded.userId || decoded.id,
-      email: decoded.email,
-    };
+      if (adminEmails.includes(userEmail)) {
+        req.user = { id: decoded.userId || decoded.id, email: decoded.email };
+        return next();
+      }
 
-    const adminEmails = (process.env.ADMIN_EMAILS || '')
-      .split(',')
-      .map(email => email.trim().toLowerCase());
-
-    const userEmail = (decoded.email || '').trim().toLowerCase();
-
-    if (!adminEmails.includes(userEmail)) {
       return res.status(403).json({ error: 'Admin access only', email: userEmail });
+    } catch (err) {
+      console.error('Admin auth error:', err);
+      return res.status(401).json({ error: 'Invalid token' });
     }
-
-    next();
-  } catch (err) {
-    console.error('Admin auth error:', err);
-    return res.status(401).json({ error: 'Invalid token' });
   }
+
+  return res.status(401).json({ error: 'No token provided' });
 };
 
-// Main dashboard stats
+// ─── Main Dashboard Stats ────────────────────────────────────────
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
     const { rows: [users] } = await query(`
@@ -158,7 +161,7 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Join waitlist (public)
+// ─── Join Waitlist (public) ──────────────────────────────────────
 router.post('/waitlist', async (req, res) => {
   try {
     const { email, name, reason } = req.body;
@@ -174,28 +177,14 @@ router.post('/waitlist', async (req, res) => {
   }
 });
 
-// Get waitlist (admin only)
-const authenticateAdmin = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  const founderKey = req.headers['x-founder-key'];
-
-  // Allow access with founder key
-  if (founderKey === process.env.FOUNDER_KEY || founderKey === 'pesamind2026') {
-    req.user = { id: 'founder', email: process.env.ADMIN_EMAILS?.split(',')[0] };
-    return next();
+// ─── Get Waitlist (admin only) ───────────────────────────────────
+router.get('/waitlist', authenticateAdmin, async (req, res) => {
+  try {
+    const { rows } = await query(`SELECT * FROM waitlist ORDER BY created_at DESC`);
+    res.json({ waitlist: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch waitlist' });
   }
+});
 
-  // Allow access with JWT token
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      if (process.env.ADMIN_EMAILS?.split(',').includes(decoded.email)) {
-        req.user = { id: decoded.userId || decoded.id, email: decoded.email };
-        return next();
-      }
-    } catch (err) {}
-  }
-
-  return res.status(403).json({ error: 'Admin access only' });
-};
+export default router;
