@@ -50,10 +50,7 @@ export const register = async (req, res) => {
     const user = rows[0];
     const token = signToken(user);
 
-    // Send welcome email (non-blocking)
-import { sendWelcomeEmail } from './services/emailService.js';
-sendWelcomeEmail(email, userName).catch(console.error);
-res.status(201).json({ token, user });
+    res.status(201).json({ token, user });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -100,7 +97,7 @@ export const getMe = async (req, res) => {
   res.json({ user: req.user });
 };
 
-// ─── Debug Token (REMOVE AFTER FIXING ADMIN ACCESS) ─────────────
+// ─── Debug Token ─────────────────────────────────────────────────
 router.get('/debug-token', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.json({ error: 'No token provided' });
@@ -114,11 +111,7 @@ router.get('/debug-token', async (req, res) => {
   }
 });
 
-// ─── Routes ─────────────────────────────────────────────────────
-router.post('/register', register);
-router.post('/login', login);
-router.get('/me', getMe);
-  
+// ─── Forgot Password ─────────────────────────────────────────────
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -126,20 +119,19 @@ router.post('/forgot-password', async (req, res) => {
     if (!rows.length) return res.json({ message: 'If that email exists, a reset link was sent' });
 
     const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    const expires = new Date(Date.now() + 3600000); // 1 hour
 
     await query(
       `UPDATE users SET verification_token = $1, updated_at = NOW() WHERE email = $2`,
       [token, email]
     );
 
-    // For now just return the token (in production send email)
     res.json({ message: 'Reset token generated', token, note: 'In production this would be emailed' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to process request' });
   }
 });
 
+// ─── Reset Password ──────────────────────────────────────────────
 router.post('/reset-password', async (req, res) => {
   try {
     const { token, password } = req.body;
@@ -158,5 +150,9 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// ─── Routes ─────────────────────────────────────────────────────
+router.post('/register', register);
+router.post('/login', login);
+router.get('/me', getMe);
 
 export default router;
