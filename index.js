@@ -9,7 +9,7 @@ import analyticsController from './analyticsController.js';
 import statementController from './statementController.js';
 import fraudController from './fraud.js';
 import adminController from './admin.js';
-import emailParser from './emailParser.js';
+import emailService from './emailService.js';
 
 const app = express();
 
