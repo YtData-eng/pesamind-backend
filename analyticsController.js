@@ -299,5 +299,49 @@ router.get('/transactions', authenticate, getTransactions);
 router.get('/health-score', authenticate, getHealthScore);
 router.post('/generate-budgets', authenticate, generateAIBudgets);
 router.get('/trend', authenticate, getMonthlyTrend);
+router.post('/recategorize', authenticate, recategorize);
+
+export const recategorize = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rows: txs } = await query(
+      `SELECT id, description FROM transactions WHERE user_id = $1 AND category = 'other'`,
+      [userId]
+    );
+
+    const CATEGORY_RULES = [
+      { category: 'food_dining', keywords: ['naivas','carrefour','quickmart','food','restaurant','cafe','java','kfc','pizza','chicken','meat','butchery','supermarket','grocery','hotel','bakery','milk','bread','unga','sukuma','nyama','chips','burger','canteen'] },
+      { category: 'transport', keywords: ['uber','bolt','little','taxi','fare','fuel','petrol','diesel','parking','matatu','bus','shuttle','kenya airways','jambojet','transport','bodaboda'] },
+      { category: 'utilities', keywords: ['kplc','kenya power','water','nawasco','electricity','internet','wifi','safaricom','airtel','dstv','gotv','startimes','zuku','faiba','gas','stima'] },
+      { category: 'airtime_data', keywords: ['airtime','data','bundle','prepaid','recharge','topup','okoa','fuliza'] },
+      { category: 'shopping', keywords: ['jumia','kilimall','clothing','shoes','fashion','mall','clothes','hardware','electronics','phone'] },
+      { category: 'healthcare', keywords: ['pharmacy','hospital','clinic','doctor','chemist','medicine','lab','dental','nursing'] },
+      { category: 'education', keywords: ['school','university','college','fees','tuition','books','training','exam'] },
+      { category: 'entertainment', keywords: ['netflix','spotify','cinema','movies','gaming','showmax','club','bar','pub','gym','fitness'] },
+      { category: 'savings', keywords: ['savings','sacco','investment','shares','mmf','insurance','nhif','nssf','deposit'] },
+      { category: 'rent', keywords: ['rent','landlord','house','apartment','bedsitter','property','lease'] },
+      { category: 'family_support', keywords: ['mum','mom','dad','father','mother','sister','brother','son','daughter','wife','husband','family','relative'] },
+    ];
+
+    let updated = 0;
+    for (const tx of txs) {
+      const lower = (tx.description || '').toLowerCase();
+      for (const { category, keywords } of CATEGORY_RULES) {
+        if (keywords.some(kw => lower.includes(kw))) {
+          await query(`UPDATE transactions SET category = $1 WHERE id = $2`, [category, tx.id]);
+          updated++;
+          break;
+        }
+      }
+    }
+
+    res.json({ message: `Recategorized ${updated} of ${txs.length} "other" transactions` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Recategorization failed' });
+  }
+};
+
+
 
 export default router;

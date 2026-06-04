@@ -50,7 +50,10 @@ export const register = async (req, res) => {
     const user = rows[0];
     const token = signToken(user);
 
-    res.status(201).json({ token, user });
+    // Send welcome email (non-blocking)
+import { sendWelcomeEmail } from './services/emailService.js';
+sendWelcomeEmail(email, userName).catch(console.error);
+res.status(201).json({ token, user });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -115,5 +118,45 @@ router.get('/debug-token', async (req, res) => {
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', getMe);
+  
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const { rows } = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (!rows.length) return res.json({ message: 'If that email exists, a reset link was sent' });
+
+    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const expires = new Date(Date.now() + 3600000); // 1 hour
+
+    await query(
+      `UPDATE users SET verification_token = $1, updated_at = NOW() WHERE email = $2`,
+      [token, email]
+    );
+
+    // For now just return the token (in production send email)
+    res.json({ message: 'Reset token generated', token, note: 'In production this would be emailed' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    const { rows } = await query('SELECT id FROM users WHERE verification_token = $1', [token]);
+    if (!rows.length) return res.status(400).json({ error: 'Invalid or expired reset token' });
+
+    const password_hash = await bcrypt.hash(password, 12);
+    await query(
+      `UPDATE users SET password_hash = $1, verification_token = NULL WHERE verification_token = $2`,
+      [password_hash, token]
+    );
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
 
 export default router;
