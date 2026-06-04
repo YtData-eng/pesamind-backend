@@ -291,16 +291,6 @@ export const getMonthlyTrend = async (req, res) => {
   }
 };
 
-router.get('/overview', authenticate, getAnalytics);
-router.get('/summary', authenticate, getMonthlySummary);
-router.get('/budgets', authenticate, getBudgets);
-router.post('/budgets', authenticate, setBudget);
-router.get('/transactions', authenticate, getTransactions);
-router.get('/health-score', authenticate, getHealthScore);
-router.post('/generate-budgets', authenticate, generateAIBudgets);
-router.get('/trend', authenticate, getMonthlyTrend);
-router.post('/recategorize', authenticate, recategorize);
-
 export const recategorize = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -341,6 +331,16 @@ export const recategorize = async (req, res) => {
     res.status(500).json({ error: 'Recategorization failed' });
   }
 };
+
+router.get('/overview', authenticate, getAnalytics);
+router.get('/summary', authenticate, getMonthlySummary);
+router.get('/budgets', authenticate, getBudgets);
+router.post('/budgets', authenticate, setBudget);
+router.get('/transactions', authenticate, getTransactions);
+router.get('/health-score', authenticate, getHealthScore);
+router.post('/generate-budgets', authenticate, generateAIBudgets);
+router.get('/trend', authenticate, getMonthlyTrend);
+router.post('/recategorize', authenticate, recategorize);
 
 
 
