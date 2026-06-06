@@ -3,8 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from './pool.js';
-import { processReferral } from './referral.js';
-import { sendWelcomeEmail } from './services/emailService.js';
 
 const router = express.Router();
 
@@ -52,18 +50,7 @@ export const register = async (req, res) => {
     const user = rows[0];
     const token = signToken(user);
 
-   
-
-// Process referral
-const { processReferral } = await import('./referral.js');
-const refCode = req.body.ref || req.query.ref;
-if (refCode) await processReferral(refCode, user.id);
-
-// Send welcome email
-import { sendWelcomeEmail } from './services/emailService.js';
-sendWelcomeEmail(email, userName, verification_token).catch(console.error);
-
-res.status(201).json({ token, user });
+    res.status(201).json({ token, user });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
