@@ -10,7 +10,7 @@ import statementController from './statementController.js';
 import fraudController from './fraud.js';
 import adminController from './admin.js';
 import billingController from './billing.js';
-
+import referralController from './referral.js';
 const app = express();
 
 app.use(helmet());
@@ -29,7 +29,7 @@ app.use('/api/statements', statementController);
 app.use('/api/fraud', fraudController);
 app.use('/api/admin', adminController);
 app.use('/api/billing', billingController);
-
+app.use('/api/referral', referralController);
 app.get('/health', (req, res) => res.json({ status: 'OK', service: 'PesaMind API' }));
 
 app.use((err, req, res, next) => {
