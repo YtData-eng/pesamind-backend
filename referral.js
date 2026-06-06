@@ -1,9 +1,10 @@
 import express from 'express';
-const router = express.Router();
-import { query } from './pool.js';
 import jwt from 'jsonwebtoken';
-import { sendReferralReward } from './services/emailService.js';
+import { query } from './pool.js';
 
+const router = express.Router();
+
+// ─── Authentication ──────────────────────────────────────────────
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -19,7 +20,7 @@ const authenticate = (req, res, next) => {
   }
 };
 
-// Get referral info
+// ─── Get Referral Info ───────────────────────────────────────────
 router.get('/info', authenticate, async (req, res) => {
   try {
     const { rows: [user] } = await query(
@@ -51,10 +52,11 @@ router.get('/info', authenticate, async (req, res) => {
   }
 });
 
-// Track referral on register (called internally)
+// ─── Process Referral (called internally on register) ────────────
 export const processReferral = async (referralCode, newUserId) => {
   try {
     if (!referralCode) return;
+
     const { rows: [referrer] } = await query(
       `SELECT id, email, name, referral_count FROM users WHERE referral_code = $1`,
       [referralCode]
@@ -69,9 +71,14 @@ export const processReferral = async (referralCode, newUserId) => {
 
     // Update referral count
     const newCount = (referrer.referral_count || 0) + 1;
-    await query(`UPDATE users SET referral_count = $1, referred_by = $2 WHERE id = $3`,
-      [newCount, referrer.id, newUserId]);
-    await query(`UPDATE users SET referral_count = $1 WHERE id = $2`, [newCount, referrer.id]);
+    await query(
+      `UPDATE users SET referral_count = $1, referred_by = $2 WHERE id = $3`,
+      [newCount, referrer.id, newUserId]
+    );
+    await query(
+      `UPDATE users SET referral_count = $1 WHERE id = $2`,
+      [newCount, referrer.id]
+    );
 
     // Reward every 3 referrals — 1 free Pro month
     if (newCount % 3 === 0) {
@@ -82,15 +89,20 @@ export const processReferral = async (referralCode, newUserId) => {
          WHERE id = $1`,
         [referrer.id]
       );
-      await query(`UPDATE referrals SET rewarded = TRUE WHERE referrer_id = $1 AND rewarded = FALSE`, [referrer.id]);
-      sendReferralReward(referrer.email, referrer.name, Math.floor(newCount / 3)).catch(console.error);
+      await query(
+        `UPDATE referrals SET rewarded = TRUE WHERE referrer_id = $1 AND rewarded = FALSE`,
+        [referrer.id]
+      );
+
+      // TODO: send reward email when emailService is ready
+      console.log(`🎉 Referral reward unlocked for ${referrer.email} — ${Math.floor(newCount / 3)} free month(s)`);
     }
   } catch (err) {
     console.error('Referral processing error:', err);
   }
 };
 
-// Share stats (for social sharing)
+// ─── Share Stats ─────────────────────────────────────────────────
 router.get('/share-stats', authenticate, async (req, res) => {
   try {
     const { rows: [totals] } = await query(`
