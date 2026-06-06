@@ -1,8 +1,10 @@
 import express from 'express';
-const router = express.Router();
-import { query } from './pool.js';
 import jwt from 'jsonwebtoken';
+import { query } from './pool.js';
 
+const router = express.Router();
+
+// ─── Authentication ──────────────────────────────────────────────
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -18,7 +20,7 @@ const authenticate = (req, res, next) => {
   }
 };
 
-// Get current plan
+// ─── Get Current Plan ────────────────────────────────────────────
 router.get('/plan', authenticate, async (req, res) => {
   try {
     const { rows: [user] } = await query(
@@ -50,7 +52,7 @@ router.get('/plan', authenticate, async (req, res) => {
   }
 });
 
-// Initiate M-Pesa STK Push
+// ─── Initiate M-Pesa STK Push ────────────────────────────────────
 router.post('/subscribe', authenticate, async (req, res) => {
   try {
     const { phone } = req.body;
@@ -90,7 +92,6 @@ router.post('/subscribe', authenticate, async (req, res) => {
     const stkData = await stkRes.json();
 
     if (stkData.ResponseCode === '0') {
-      // Save pending payment
       await query(
         `INSERT INTO payments (user_id, amount, phone, checkout_request_id, status)
          VALUES ($1, 299, $2, $3, 'pending')`,
@@ -111,7 +112,7 @@ router.post('/subscribe', authenticate, async (req, res) => {
   }
 });
 
-// M-Pesa callback
+// ─── M-Pesa Callback ─────────────────────────────────────────────
 router.post('/callback', async (req, res) => {
   try {
     const { Body } = req.body;
@@ -120,14 +121,15 @@ router.post('/callback', async (req, res) => {
 
     if (ResultCode === 0) {
       const items = CallbackMetadata?.Item || [];
-      const receipt = items.find((i: any) => i.Name === 'MpesaReceiptNumber')?.Value;
+
+      // FIXED: removed TypeScript syntax (i: any)
+      const receipt = items.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
 
       await query(
         `UPDATE payments SET status = 'completed', mpesa_receipt = $1 WHERE checkout_request_id = $2`,
         [receipt, CheckoutRequestID]
       );
 
-      // Activate Pro plan for 30 days
       const { rows: [payment] } = await query(
         `SELECT user_id FROM payments WHERE checkout_request_id = $1`,
         [CheckoutRequestID]
@@ -138,7 +140,7 @@ router.post('/callback', async (req, res) => {
           `UPDATE users SET plan = 'pro', plan_expires_at = NOW() + INTERVAL '30 days' WHERE id = $1`,
           [payment.user_id]
         );
-        console.log(`Pro activated for user ${payment.user_id}`);
+        console.log(`✅ Pro activated for user ${payment.user_id}`);
       }
     } else {
       await query(
@@ -154,7 +156,7 @@ router.post('/callback', async (req, res) => {
   }
 });
 
-// Check payment status
+// ─── Check Payment Status ────────────────────────────────────────
 router.get('/status/:checkoutId', authenticate, async (req, res) => {
   try {
     const { rows: [payment] } = await query(
@@ -168,11 +170,11 @@ router.get('/status/:checkoutId', authenticate, async (req, res) => {
   }
 });
 
-// Payment history
+// ─── Payment History ─────────────────────────────────────────────
 router.get('/history', authenticate, async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT amount, phone, mpesa_receipt, status, plan, created_at FROM payments WHERE user_id = $1 ORDER BY created_at DESC`,
+      `SELECT amount, phone, mpesa_receipt, status, created_at FROM payments WHERE user_id = $1 ORDER BY created_at DESC`,
       [req.user.id]
     );
     res.json({ payments: rows });
@@ -181,7 +183,7 @@ router.get('/history', authenticate, async (req, res) => {
   }
 });
 
-// Manual upgrade (for testing)
+// ─── Manual Upgrade (for testing) ───────────────────────────────
 router.post('/upgrade-manual', authenticate, async (req, res) => {
   try {
     await query(
