@@ -31,7 +31,13 @@ app.use('/api/admin', adminController);
 app.use('/api/billing', billingController);
 app.use('/api/referral', referralController);
 app.get('/health', (req, res) => res.json({ status: 'OK', service: 'PesaMind API' }));
-
+app.use(cors({ 
+  origin: [
+    'https://pesamind.online', 
+    'https://www.pesamind.online',
+    'http://localhost:4000'
+  ] 
+}));
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
