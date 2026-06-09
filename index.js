@@ -33,9 +33,10 @@ app.use('/api/referral', referralController);
 app.get('/health', (req, res) => res.json({ status: 'OK', service: 'PesaMind API' }));
 app.use(cors({ 
   origin: [
-    'https://pesamind.online', 
+    'https://pesamind.online',
     'https://www.pesamind.online',
-    'http://localhost:4000'
+    'http://localhost:3000',
+    'http://localhost:3001'
   ] 
 }));
 app.use((err, req, res, next) => {
