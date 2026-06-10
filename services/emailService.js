@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM = 'PesaMind <onboarding@resend.dev>';
-const APP_URL = 'https://pesamind-frontend-f77z.vercel.app';
+const APP_URL = process.env.APP_URL || 'https://pesamind.online';
 
 const baseStyle = `font-family: system-ui, sans-serif; max-width: 560px; margin: 0 auto; background: #050F09; color: white; padding: 40px; border-radius: 16px;`;
 const logoHtml = `<div style="text-align: center; margin-bottom: 32px;"><div style="width: 56px; height: 56px; background: #00E87A; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 12px;">₿</div><h2 style="margin: 0; color: white; font-size: 22px;">PesaMind</h2></div>`;
